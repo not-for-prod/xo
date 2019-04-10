@@ -10,7 +10,7 @@ import (
 
 	"github.com/knq/snaker"
 
-	"github.com/xo/xo/internal"
+	"github.com/KippaZou/xo/internal"
 	"github.com/xo/xo/models"
 )
 

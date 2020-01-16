@@ -7,7 +7,7 @@ import (
 
 	"github.com/knq/snaker"
 
-	"github.com/sundayfun/xo/internal"
+	"github.com/KippaZou/xo/internal"
 	"github.com/xo/xo/models"
 )
 

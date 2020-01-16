@@ -1,4 +1,5 @@
-module github.com/sundayfun/xo
+
+module github.com/KippaZou/xo
 
 require (
 	github.com/alexflint/go-arg v0.0.0-20181120184500-fb7d95b61ba8
@@ -17,6 +18,9 @@ require (
 	github.com/xo/xoutil v0.0.0-20171112033149-46189f4026a5
 	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
+	github.com/xo/dburl v0.0.0-20181118001949-f3ca07bd6afc
+	github.com/xo/xo v0.0.0-20190105221319-1a94fa516029
+	github.com/xo/xoutil v0.0.0-20171112033149-46189f4026a5
 	gopkg.in/rana/ora.v4 v4.1.15
 	gopkg.in/yaml.v2 v2.2.7 // indirect
 )

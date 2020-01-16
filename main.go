@@ -17,10 +17,12 @@ import (
 	"github.com/alexflint/go-arg"
 	"github.com/go-yaml/yaml"
 
-	"github.com/sundayfun/xo/internal"
-	_ "github.com/sundayfun/xo/loaders"
-	"github.com/sundayfun/xo/models"
+
+	"github.com/KippaZou/xo/internal"
 	"github.com/xo/dburl"
+	"github.com/KippaZou/xo/models"
+
+	_ "github.com/KippaZou/xo/loaders"
 	_ "github.com/xo/xoutil"
 )
 

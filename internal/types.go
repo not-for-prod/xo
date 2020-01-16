@@ -12,8 +12,10 @@ const (
 	TypeTemplate
 	ForeignKeyTemplate
 	IndexTemplate
+	MapTemplate
 	QueryTypeTemplate
 	QueryTemplate
+	OptionalTemplate
 
 	// always last
 	XOTemplate
@@ -35,10 +37,14 @@ func (tt TemplateType) String() string {
 		s = "foreignkey"
 	case IndexTemplate:
 		s = "index"
+	case MapTemplate:
+		s = "map"
 	case QueryTypeTemplate:
 		s = "querytype"
 	case QueryTemplate:
 		s = "query"
+	case OptionalTemplate:
+		s = "optional"
 	default:
 		panic("unknown TemplateType")
 	}
@@ -65,6 +71,13 @@ const (
 	ColumnEsc
 )
 
+type LoadType uint
+
+const (
+	LoadQueryFunc = iota
+	LoadMapFunc
+)
+
 // String provides the string representation of RelType.
 func (rt RelType) String() string {
 	var s string
@@ -77,6 +90,10 @@ func (rt RelType) String() string {
 		panic("unknown RelType")
 	}
 	return s
+}
+
+type MethodsConfig struct {
+	ListFields []string `yaml:"list_fields"`
 }
 
 // EnumValue holds data for a single enum value.
@@ -127,6 +144,7 @@ type Type struct {
 	Fields           []*Field
 	Table            *models.Table
 	Comment          string
+	HasDeletedField  bool
 }
 
 // ForeignKey is a template item for a foreign relationship on a table.
@@ -143,12 +161,20 @@ type ForeignKey struct {
 
 // Index is a template item for a index into a table.
 type Index struct {
-	FuncName string
-	Schema   string
-	Type     *Type
-	Fields   []*Field
-	Index    *models.Index
-	Comment  string
+	FuncName    string
+	MapFuncName string
+	MapField    *Field
+	Schema      string
+	Type        *Type
+	Fields      []*Field
+	Index       *models.Index
+	Comment     string
+}
+
+type MethodsOption struct {
+	Type       *Type
+	Sub        string
+	ListFields bool
 }
 
 // QueryParam is a query parameter for a custom query.

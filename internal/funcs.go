@@ -1,12 +1,13 @@
 package internal
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"text/template"
 
+	"github.com/gedex/inflector"
 	"github.com/knq/snaker"
-
 	"github.com/xo/xo/models"
 )
 
@@ -15,7 +16,9 @@ func (a *ArgType) NewTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"colcount":           a.colcount,
 		"colnames":           a.colnames,
+		"colnamesgeo":        a.colnamesgeo,
 		"colnamesmulti":      a.colnamesmulti,
+		"colnamesgeomulti":   a.colnamesgeomulti,
 		"colnamesquery":      a.colnamesquery,
 		"colnamesquerymulti": a.colnamesquerymulti,
 		"colprefixnames":     a.colprefixnames,
@@ -33,6 +36,8 @@ func (a *ArgType) NewTemplateFuncs() template.FuncMap {
 		"hascolumn":          a.hascolumn,
 		"hasfield":           a.hasfield,
 		"getstartcount":      a.getstartcount,
+		"pluralize":          a.pluralize,
+		"snaketocamel":       a.snaketocamel,
 	}
 }
 
@@ -194,6 +199,40 @@ func (a *ArgType) colnames(fields []*Field, ignoreNames ...string) string {
 	return str
 }
 
+// colnamesgeo creates a list of the column names found in fields, excluding any
+// Field with Name contained in ignoreNames.
+//
+// Used to present a comma separated list of column names, that can be used in
+// a SELECT, or UPDATE, or other SQL clause requiring an list of identifiers
+// (ie, "field_1, field_2, field_3, ...").
+// Used in select query ST_AsBinary for geo info fields
+func (a *ArgType) colnamesgeo(fields []*Field, ignoreNames ...string) string {
+	ignore := map[string]bool{}
+	for _, n := range ignoreNames {
+		ignore[n] = true
+	}
+
+	str := ""
+	i := 0
+	for _, f := range fields {
+		if ignore[f.Name] {
+			continue
+		}
+
+		if i != 0 {
+			str = str + ", "
+		}
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + fmt.Sprintf("ST_AsBinary(%s)", a.colname(f.Col))
+		} else {
+			str = str + a.colname(f.Col)
+		}
+		i++
+	}
+
+	return str
+}
+
 // colnamesmulti creates a list of the column names found in fields, excluding any
 // Field with Name contained in ignoreNames.
 //
@@ -223,16 +262,17 @@ func (a *ArgType) colnamesmulti(fields []*Field, ignoreNames []*Field) string {
 	return str
 }
 
-// colnamesquery creates a list of the column names in fields as a query and
-// joined by sep, excluding any Field with Name contained in ignoreNames.
+// colnamesgeomulti creates a list of the column names found in fields, excluding any
+// Field with Name contained in ignoreNames.
 //
-// Used to create a list of column names in a WHERE clause (ie, "field_1 = $1
-// AND field_2 = $2 AND ...") or in an UPDATE clause (ie, "field = $1, field =
-// $2, ...").
-func (a *ArgType) colnamesquery(fields []*Field, sep string, ignoreNames ...string) string {
+// Used to present a comma separated list of column names, that can be used in
+// a SELECT, or UPDATE, or other SQL clause requiring an list of identifiers
+// (ie, "field_1, field_2, field_3, ...").
+// Used in select query ST_AsBinary for geo info fields
+func (a *ArgType) colnamesgeomulti(fields []*Field, ignoreNames []*Field) string {
 	ignore := map[string]bool{}
-	for _, n := range ignoreNames {
-		ignore[n] = true
+	for _, f := range ignoreNames {
+		ignore[f.Name] = true
 	}
 
 	str := ""
@@ -243,10 +283,57 @@ func (a *ArgType) colnamesquery(fields []*Field, sep string, ignoreNames ...stri
 		}
 
 		if i != 0 {
+			str = str + ", "
+		}
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + fmt.Sprintf("ST_AsBinary(%s)", a.colname(f.Col))
+		} else {
+			str = str + a.colname(f.Col)
+		}
+		i++
+	}
+
+	return str
+}
+
+// colnamesquery creates a list of the column names in fields as a query and
+// joined by sep, excluding any Field with Name contained in ignoreNames.
+//
+// Used to create a list of column names in a WHERE clause (ie, "field_1 = $1
+// AND field_2 = $2 AND ...") or in an UPDATE clause (ie, "field = $1, field =
+// $2, ...").
+func (a *ArgType) colnamesquery(fields []*Field, hasDeletedField bool, sep string, ignoreNames ...string) string {
+	ignore := map[string]bool{}
+	for _, n := range ignoreNames {
+		ignore[n] = true
+	}
+
+	str := ""
+	i := 0
+	var skipDeleted bool
+	for _, f := range fields {
+		if ignore[f.Name] {
+			continue
+		}
+
+		if f.Name == "is_deleted" {
+			skipDeleted = true
+		}
+
+		if i != 0 {
 			str = str + sep
 		}
-		str = str + a.colname(f.Col) + " = " + a.Loader.NthParam(i)
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + a.colname(f.Col) + " = " + "ST_GeomFromWKB(?)"
+		} else {
+			str = str + a.colname(f.Col) + " = " + a.Loader.NthParam(i)
+		}
 		i++
+	}
+
+	if hasDeletedField && !skipDeleted {
+		str += sep
+		str += "is_deleted = false"
 	}
 
 	return str
@@ -258,7 +345,7 @@ func (a *ArgType) colnamesquery(fields []*Field, sep string, ignoreNames ...stri
 // Used to create a list of column names in a WHERE clause (ie, "field_1 = $1
 // AND field_2 = $2 AND ...") or in an UPDATE clause (ie, "field = $1, field =
 // $2, ...").
-func (a *ArgType) colnamesquerymulti(fields []*Field, sep string, startCount int, ignoreNames []*Field) string {
+func (a *ArgType) colnamesquerymulti(fields []*Field, hasDeletedField bool, sep string, startCount int, ignoreNames []*Field) string {
 	ignore := map[string]bool{}
 	for _, f := range ignoreNames {
 		ignore[f.Name] = true
@@ -266,16 +353,30 @@ func (a *ArgType) colnamesquerymulti(fields []*Field, sep string, startCount int
 
 	str := ""
 	i := startCount
+	var skipDeleted bool
 	for _, f := range fields {
 		if ignore[f.Name] {
 			continue
 		}
 
+		if f.Name == "is_deleted" {
+			skipDeleted = true
+		}
+
 		if i > startCount {
 			str = str + sep
 		}
-		str = str + a.colname(f.Col) + " = " + a.Loader.NthParam(i)
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + a.colname(f.Col) + " = " + "ST_GeomFromWKB(?)"
+		} else {
+			str = str + a.colname(f.Col) + " = " + a.Loader.NthParam(i)
+		}
 		i++
+	}
+
+	if hasDeletedField && !skipDeleted {
+		str += sep
+		str += "is_deleted = false"
 	}
 
 	return str
@@ -330,7 +431,11 @@ func (a *ArgType) colvals(fields []*Field, ignoreNames ...string) string {
 		if i != 0 {
 			str = str + ", "
 		}
-		str = str + a.Loader.NthParam(i)
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + "ST_GeomFromWKB(?)"
+		} else {
+			str = str + a.Loader.NthParam(i)
+		}
 		i++
 	}
 
@@ -358,7 +463,11 @@ func (a *ArgType) colvalsmulti(fields []*Field, ignoreNames []*Field) string {
 		if i != 0 {
 			str = str + ", "
 		}
-		str = str + a.Loader.NthParam(i)
+		if _, ok := a.GeoInfoTypeMap[f.Type]; ok {
+			str = str + "ST_GeomFromWKB(?)"
+		} else {
+			str = str + a.Loader.NthParam(i)
+		}
 		i++
 	}
 
@@ -635,4 +744,12 @@ func (a *ArgType) hasfield(fields []*Field, name string) bool {
 // getstartcount returns a starting count for numbering columsn in queries
 func (a *ArgType) getstartcount(fields []*Field, pkFields []*Field) int {
 	return len(fields) - len(pkFields)
+}
+
+func (a *ArgType) pluralize(name string) string {
+	return inflector.Pluralize(name)
+}
+
+func (a *ArgType) snaketocamel(name string) string {
+	return snaker.ForceLowerCamelIdentifier(name)
 }

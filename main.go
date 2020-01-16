@@ -15,12 +15,14 @@ import (
 	"strings"
 
 	"github.com/alexflint/go-arg"
+	"github.com/go-yaml/yaml"
+
 
 	"github.com/KippaZou/xo/internal"
 	"github.com/xo/dburl"
-	"github.com/xo/xo/models"
+	"github.com/KippaZou/xo/models"
 
-	_ "github.com/xo/xo/loaders"
+	_ "github.com/KippaZou/xo/loaders"
 	_ "github.com/xo/xoutil"
 )
 
@@ -201,6 +203,27 @@ func processArgs(args *internal.ArgType) error {
 		}
 	}
 
+	if args.MethodsConfigFile != "" {
+		err = parseMethodsConfigFile(args)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func parseMethodsConfigFile(args *internal.ArgType) error {
+	data, err := ioutil.ReadFile(args.MethodsConfigFile)
+	if err != nil {
+		return err
+	}
+	m := &internal.MethodsConfig{}
+	err = yaml.Unmarshal(data, &m)
+	if err != nil {
+		return err
+	}
+	args.Methods = m
 	return nil
 }
 
@@ -358,7 +381,7 @@ func writeTypes(args *internal.ArgType) error {
 	// process written files with goimports
 	output, err := exec.Command("goimports", params...).CombinedOutput()
 	if err != nil {
-		return errors.New(string(output))
+		return fmt.Errorf("%s with error message: %s", output, err.Error())
 	}
 
 	return nil

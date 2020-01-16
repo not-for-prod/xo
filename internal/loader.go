@@ -288,6 +288,15 @@ func (tl TypeLoader) LoadSchema(args *ArgType) error {
 		return err
 	}
 
+	_, err = tl.LoadIndexesQueryMapFunc(args, tableMap)
+	if err != nil {
+		return err
+	}
+
+	err = tl.LoadOptionalMethods(args, tableMap)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -542,6 +551,10 @@ func (tl TypeLoader) LoadColumns(args *ArgType, typeTpl *Type) error {
 			typeTpl.PrimaryKey = f
 		}
 
+		if c.ColumnName == "is_deleted" && f.Type == "bool" {
+			typeTpl.HasDeletedField = true
+		}
+
 		// append col to template fields
 		typeTpl.Fields = append(typeTpl.Fields, f)
 	}
@@ -656,7 +669,7 @@ func (tl TypeLoader) LoadIndexes(args *ArgType, tableMap map[string]*Type) (map[
 	ixMap := map[string]*Index{}
 	for _, t := range tableMap {
 		// load table indexes
-		err = tl.LoadTableIndexes(args, t, ixMap)
+		err = tl.LoadTableIndexes(args, t, ixMap, LoadQueryFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -664,7 +677,64 @@ func (tl TypeLoader) LoadIndexes(args *ArgType, tableMap map[string]*Type) (map[
 
 	// generate templates
 	for _, ix := range ixMap {
-		err = args.ExecuteTemplate(IndexTemplate, ix.Type.Name, ix.Index.IndexName, ix)
+		err = args.ExecuteTemplate(IndexTemplate, ix.Type.Name, ix.FuncName, ix)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ixMap, nil
+}
+
+// LoadIndexes loads schema index definitions.
+func (tl TypeLoader) LoadOptionalMethods(args *ArgType, tableMap map[string]*Type) error {
+	if args.Methods == nil {
+		return nil
+	}
+	m1 := make(map[string]struct{}, len(args.Methods.ListFields))
+	for _, c := range args.Methods.ListFields {
+		m1[c] = struct{}{}
+	}
+
+	fm := map[string]*MethodsOption{}
+	for tableName, t := range tableMap {
+		option := &MethodsOption{
+			Type: t,
+			Sub:  fmt.Sprintf("%sOptional", t.Name),
+		}
+		if _, ok := m1[tableName]; ok {
+			option.ListFields = true
+		}
+		if option.ListFields {
+			fm[tableName] = option
+		}
+	}
+	for _, f := range fm {
+		// generate templates
+		err := args.ExecuteTemplate(OptionalTemplate, f.Type.Name, f.Sub, f)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LoadIndexesQueryMapFunc loads schema index definitions.
+func (tl TypeLoader) LoadIndexesQueryMapFunc(args *ArgType, tableMap map[string]*Type) (map[string]*Index, error) {
+	var err error
+
+	ixMap := map[string]*Index{}
+	for _, t := range tableMap {
+		// load table indexes
+		err = tl.LoadTableIndexes(args, t, ixMap, LoadMapFunc)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// generate templates
+	for _, ix := range ixMap {
+		err = args.ExecuteTemplate(MapTemplate, ix.Type.Name, ix.MapFuncName, ix)
 		if err != nil {
 			return nil, err
 		}
@@ -674,7 +744,7 @@ func (tl TypeLoader) LoadIndexes(args *ArgType, tableMap map[string]*Type) (map[
 }
 
 // LoadTableIndexes loads schema index definitions per table.
-func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[string]*Index) error {
+func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[string]*Index, loadType LoadType) error {
 	var err error
 	var priIxLoaded bool
 
@@ -703,10 +773,37 @@ func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[st
 			return err
 		}
 
-		// build func name
-		args.BuildIndexFuncName(ixTpl)
-
-		ixMap[typeTpl.Table.TableName+"_"+ix.IndexName] = ixTpl
+		l := len(ixTpl.Fields)
+		for i := 0; i < l; i++ {
+			index := &models.Index{
+				IndexName: ix.IndexName,
+				IsUnique:  ix.IsUnique,
+				IsPrimary: ix.IsPrimary,
+				SeqNo:     ix.SeqNo,
+				Origin:    ix.Origin,
+				IsPartial: ix.IsPartial,
+			}
+			if i > 0 {
+				index.IsUnique = false
+			}
+			// fake index according to Leftmost Prefixing for generating query func
+			ixTplNew := &Index{
+				Schema: args.Schema,
+				Type:   typeTpl,
+				Fields: ixTpl.Fields[:l-i],
+				Index:  index,
+			}
+			if loadType == LoadQueryFunc {
+				// build func name
+				args.BuildIndexFuncName(ixTplNew)
+				// distinct func name
+				ixMap[ixTplNew.FuncName] = ixTplNew
+			}
+		}
+		if loadType == LoadMapFunc && len(ixTpl.Fields) == 1 && ix.IsUnique {
+			args.BuildIndexMapFuncName(ixTpl)
+			ixMap[ixTpl.MapFuncName] = ixTpl
+		}
 	}
 
 	// search for primary key if it was skipped being set in the type
@@ -725,16 +822,26 @@ func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[st
 	// sqlite doesn't define primary keys in its index list
 	if args.LoaderType != "ora" && !priIxLoaded && pk != nil {
 		ixName := typeTpl.Table.TableName + "_" + pk.Col.ColumnName + "_pkey"
-		ixMap[ixName] = &Index{
-			FuncName: typeTpl.Name + "By" + pk.Name,
-			Schema:   args.Schema,
-			Type:     typeTpl,
-			Fields:   []*Field{pk},
+		funcName := typeTpl.Name + "By" + pk.Name
+		mapFuncName := inflector.Pluralize(typeTpl.Name) + "MapBy" + inflector.Pluralize(pk.Name)
+		idx := &Index{
+			FuncName:    funcName,
+			MapFuncName: mapFuncName,
+			MapField:    pk,
+			Schema:      args.Schema,
+			Type:        typeTpl,
+			Fields:      []*Field{pk},
 			Index: &models.Index{
 				IndexName: ixName,
 				IsUnique:  true,
 				IsPrimary: true,
 			},
+		}
+		switch loadType {
+		case LoadQueryFunc:
+			ixMap[funcName] = idx
+		case LoadMapFunc:
+			ixMap[mapFuncName] = idx
 		}
 	}
 

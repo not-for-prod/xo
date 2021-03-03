@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gedex/inflector"
-	"github.com/knq/snaker"
+	"github.com/kenshaw/snaker"
 )
 
 // ParseQuery takes the query in args and looks for strings in the form of
@@ -236,6 +236,14 @@ func SingularizeIdentifier(s string) string {
 	}
 
 	return snaker.SnakeToCamelIdentifier(s)
+}
+
+// 因为有个服务的名字叫 Group 和 Group Service 冲突了，这里改为 MGroup
+func GroupCompatible(args *ArgType, name string) string {
+	if len(args.RpcProtoPathPrefix) > 0 && name == "Group" {
+		return "MGroup"
+	}
+	return name
 }
 
 // TBuf is to hold the executed templates.

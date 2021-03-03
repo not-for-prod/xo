@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gedex/inflector"
-	"github.com/knq/snaker"
+	"github.com/kenshaw/snaker"
 
 	"github.com/xo/xo/models"
 )
@@ -147,7 +147,7 @@ func (tl TypeLoader) ParseQuery(args *ArgType) error {
 
 	// create template for query type
 	typeTpl := &Type{
-		Name:    args.QueryType,
+		Name:    GroupCompatible(args, args.QueryType),
 		RelType: Table,
 		Fields:  []*Field{},
 		Table: &models.Table{
@@ -196,7 +196,7 @@ func (tl TypeLoader) ParseQuery(args *ArgType) error {
 	}
 
 	// generate query type template
-	err = args.ExecuteTemplate(QueryTypeTemplate, args.QueryType, "", typeTpl)
+	err = args.ExecuteTemplate(QueryTypeTemplate, args.QueryType, "", typeTpl, false)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func (tl TypeLoader) ParseQuery(args *ArgType) error {
 	}
 
 	// generate template
-	err = args.ExecuteTemplate(QueryTemplate, args.QueryType, "", queryTpl)
+	err = args.ExecuteTemplate(QueryTemplate, args.QueryType, "", queryTpl, false)
 	if err != nil {
 		return err
 	}
@@ -297,6 +297,8 @@ func (tl TypeLoader) LoadSchema(args *ArgType) error {
 	if err != nil {
 		return err
 	}
+
+	args.TableMap = tableMap
 	return nil
 }
 
@@ -307,6 +309,11 @@ func (tl TypeLoader) LoadEnums(args *ArgType) (map[string]*Enum, error) {
 	// not supplied, so bail
 	if tl.EnumList == nil {
 		return nil, nil
+	}
+	if args.OnlyConfigTable {
+		if _, exists := args.ConfigTables[args.Schema]; !exists {
+			return nil, nil
+		}
 	}
 
 	// load enums
@@ -337,7 +344,7 @@ func (tl TypeLoader) LoadEnums(args *ArgType) (map[string]*Enum, error) {
 
 	// generate enum templates
 	for _, e := range enumMap {
-		err = args.ExecuteTemplate(EnumTemplate, e.Name, "", e)
+		err = args.ExecuteTemplate(EnumTemplate, e.Name, "", e, false)
 		if err != nil {
 			return nil, err
 		}
@@ -424,7 +431,7 @@ func (tl TypeLoader) LoadProcs(args *ArgType) (map[string]*Proc, error) {
 
 	// generate proc templates
 	for _, p := range procMap {
-		err = args.ExecuteTemplate(ProcTemplate, "sp_"+p.Name, "", p)
+		err = args.ExecuteTemplate(ProcTemplate, "sp_"+p.Name, "", p, false)
 		if err != nil {
 			return nil, err
 		}
@@ -478,13 +485,20 @@ func (tl TypeLoader) LoadRelkind(args *ArgType, relType RelType) (map[string]*Ty
 	// tables
 	tableMap := make(map[string]*Type)
 	for _, ti := range tableList {
+		if args.OnlyConfigTable {
+			if _, exists := args.ConfigTables[ti.TableName]; !exists {
+				continue
+			}
+		}
+
 		// create template
 		typeTpl := &Type{
-			Name:    SingularizeIdentifier(ti.TableName),
+			Name:    GroupCompatible(args, SingularizeIdentifier(ti.TableName)),
 			Schema:  args.Schema,
 			RelType: relType,
 			Fields:  []*Field{},
 			Table:   ti,
+			Indexes: make(map[string]*Index),
 		}
 
 		// process columns
@@ -498,7 +512,7 @@ func (tl TypeLoader) LoadRelkind(args *ArgType, relType RelType) (map[string]*Ty
 
 	// generate table templates
 	for _, t := range tableMap {
-		err = args.ExecuteTemplate(TypeTemplate, t.Name, "", t)
+		err = args.ExecuteTemplate(TypeTemplate, t.Name, "", t, false)
 		if err != nil {
 			return nil, err
 		}
@@ -582,7 +596,7 @@ func (tl TypeLoader) LoadForeignKeys(args *ArgType, tableMap map[string]*Type) (
 
 	// generate templates
 	for _, fk := range fkMap {
-		err = args.ExecuteTemplate(ForeignKeyTemplate, fk.Type.Name, fk.ForeignKey.ForeignKeyName, fk)
+		err = args.ExecuteTemplate(ForeignKeyTemplate, fk.Type.Name, fk.ForeignKey.ForeignKeyName, fk, false)
 		if err != nil {
 			return nil, err
 		}
@@ -677,7 +691,7 @@ func (tl TypeLoader) LoadIndexes(args *ArgType, tableMap map[string]*Type) (map[
 
 	// generate templates
 	for _, ix := range ixMap {
-		err = args.ExecuteTemplate(IndexTemplate, ix.Type.Name, ix.FuncName, ix)
+		err = args.ExecuteTemplate(IndexTemplate, ix.Type.Name, ix.FuncName, ix, false)
 		if err != nil {
 			return nil, err
 		}
@@ -691,31 +705,65 @@ func (tl TypeLoader) LoadOptionalMethods(args *ArgType, tableMap map[string]*Typ
 	if args.Methods == nil {
 		return nil
 	}
-	m1 := make(map[string]struct{}, len(args.Methods.ListFields))
-	for _, c := range args.Methods.ListFields {
-		m1[c] = struct{}{}
+	modelToPBMap := make(map[string]*ModelToPBConfig, len(args.Methods.ModelToPB))
+	for s, c := range args.Methods.ModelToPB {
+		for _, m := range c {
+			skips := make(map[string]struct{}, len(m.Skips))
+			for _, skip := range m.Skips {
+				skips[skip] = struct{}{}
+			}
+			modelToPBMap[m.Name] = &ModelToPBConfig{
+				ImportService: s,
+				SkipFields:    skips,
+			}
+		}
 	}
 
-	fm := map[string]*MethodsOption{}
+	mos := map[string]*MethodsOption{}
+	pcs := map[string]ProtoConfig{}
 	for tableName, t := range tableMap {
 		option := &MethodsOption{
 			Type: t,
 			Sub:  fmt.Sprintf("%sOptional", t.Name),
 		}
-		if _, ok := m1[tableName]; ok {
-			option.ListFields = true
+		option.ListFields = true
+		if s, ok := modelToPBMap[tableName]; ok {
+			option.ModelToPB = true
+			option.ModelToPBConfig = s
+
+			importStr := fmt.Sprintf("%s/service/%s", args.ServerProtoPathPrefix, goPackageName(s.ImportService))
+			if _, ok = args.Imports[t.Name]; ok {
+				args.Imports[t.Name] = append(args.Imports[t.Name], importStr)
+			} else {
+				args.Imports[t.Name] = []string{importStr}
+			}
+
+			if _, ok := pcs[s.ImportService]; ok {
+				pcs[s.ImportService] = append(pcs[s.ImportService], option)
+			} else {
+				pcs[s.ImportService] = ProtoConfig{option}
+			}
 		}
-		if option.ListFields {
-			fm[tableName] = option
+
+		if option.ListFields || option.ModelToPB {
+			mos[tableName] = option
 		}
 	}
-	for _, f := range fm {
+	for _, m := range mos {
 		// generate templates
-		err := args.ExecuteTemplate(OptionalTemplate, f.Type.Name, f.Sub, f)
+		err := args.ExecuteTemplate(OptionalTemplate, m.Type.Name, m.Sub, m, false)
 		if err != nil {
 			return err
 		}
 	}
+
+	for svc, pc := range pcs {
+		err := args.ExecuteTemplate(TypeProtoTemplate, svc, svc, pc, true)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -734,7 +782,7 @@ func (tl TypeLoader) LoadIndexesQueryMapFunc(args *ArgType, tableMap map[string]
 
 	// generate templates
 	for _, ix := range ixMap {
-		err = args.ExecuteTemplate(MapTemplate, ix.Type.Name, ix.MapFuncName, ix)
+		err = args.ExecuteTemplate(MapTemplate, ix.Type.Name, ix.MapFuncName, ix, false)
 		if err != nil {
 			return nil, err
 		}
@@ -798,11 +846,13 @@ func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[st
 				args.BuildIndexFuncName(ixTplNew)
 				// distinct func name
 				ixMap[ixTplNew.FuncName] = ixTplNew
+				typeTpl.Indexes[ixTplNew.FuncName] = ixTplNew
 			}
 		}
 		if loadType == LoadMapFunc && len(ixTpl.Fields) == 1 && ix.IsUnique {
 			args.BuildIndexMapFuncName(ixTpl)
 			ixMap[ixTpl.MapFuncName] = ixTpl
+			typeTpl.Indexes[ixTpl.MapFuncName] = ixTpl
 		}
 	}
 
@@ -839,9 +889,15 @@ func (tl TypeLoader) LoadTableIndexes(args *ArgType, typeTpl *Type, ixMap map[st
 		}
 		switch loadType {
 		case LoadQueryFunc:
+			// xo_db 依赖 为空来判断类型
+			idx.MapFuncName = ""
 			ixMap[funcName] = idx
+			typeTpl.Indexes[funcName] = idx
+
 		case LoadMapFunc:
+			idx.FuncName = ""
 			ixMap[mapFuncName] = idx
+			typeTpl.Indexes[mapFuncName] = idx
 		}
 	}
 

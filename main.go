@@ -26,6 +26,8 @@ import (
 	_ "github.com/xo/xoutil"
 )
 
+const version = "1.0.2"
+
 func main() {
 	// circumvent all logic to just determine if xo was built with oracle
 	// support
@@ -36,6 +38,11 @@ func main() {
 		}
 
 		fmt.Fprintf(os.Stdout, "%d", out)
+		return
+	}
+
+	if len(os.Args) == 2 && os.Args[1] == "-version" {
+		fmt.Fprintf(os.Stdout, version)
 		return
 	}
 
@@ -84,7 +91,7 @@ func main() {
 	}
 
 	// add xo
-	err = args.ExecuteTemplate(internal.XOTemplate, "xo_db", "", args)
+	err = args.ExecuteTemplate(internal.XOTemplate, "xo_db", "", args, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -92,6 +99,12 @@ func main() {
 
 	// output
 	err = writeTypes(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = writeProto(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -224,6 +237,11 @@ func parseMethodsConfigFile(args *internal.ArgType) error {
 		return err
 	}
 	args.Methods = m
+	for _, v := range m.ModelToPB {
+		for _, table := range v {
+			args.ConfigTables[table.Name] = struct{}{}
+		}
+	}
 	return nil
 }
 
@@ -262,16 +280,22 @@ var files = map[string]*os.File{}
 // getFile builds the filepath from the TBuf information, and retrieves the
 // file from files. If the built filename is not already defined, then it calls
 // the os.OpenFile with the correct parameters depending on the state of args.
-func getFile(args *internal.ArgType, t *internal.TBuf) (*os.File, error) {
+func getFile(args *internal.ArgType, t *internal.TBuf, isProto bool) (*os.File, error) {
 	var f *os.File
 	var err error
 
 	// determine filename
-	var filename = strings.ToLower(t.Name) + args.Suffix
-	if args.SingleFile {
-		filename = args.Filename
+	filename := strings.ToLower(t.Name)
+	if isProto {
+		filename = fmt.Sprintf("%s_model.proto", internal.ProtoName(filename))
+		filename = path.Join(args.RpcProtoPathPrefix, filename)
+	} else {
+		filename = filename + args.Suffix
+		if args.SingleFile {
+			filename = args.Filename
+		}
+		filename = path.Join(args.Path, filename)
 	}
-	filename = path.Join(args.Path, filename)
 
 	// lookup file
 	f, ok := files[filename]
@@ -291,10 +315,12 @@ func getFile(args *internal.ArgType, t *internal.TBuf) (*os.File, error) {
 		mode = os.O_APPEND | os.O_WRONLY
 	}
 
+	// @heimonsy 考虑到我们的 xo_db 可能会经常改
+	// 这里就不跳过了
 	// skip
-	if t.TemplateType == internal.XOTemplate && fi != nil {
-		return nil, nil
-	}
+	//if t.TemplateType == internal.XOTemplate && fi != nil {
+	//return nil, nil
+	//}
 
 	// open file
 	f, err = os.OpenFile(filename, mode, 0666)
@@ -303,14 +329,20 @@ func getFile(args *internal.ArgType, t *internal.TBuf) (*os.File, error) {
 	}
 
 	// file didn't originally exist, so add package header
-	if fi == nil || !args.Append {
+	if !isProto && (fi == nil || !args.Append) {
 		// add build tags
 		if args.Tags != "" {
 			f.WriteString(`// +build ` + args.Tags + "\n\n")
 		}
 
+		imports := &internal.Imports{
+			Package: args.Package,
+			Imports: args.Imports[t.Name],
+			Schema:  args.Schema,
+		}
+
 		// execute
-		err = args.TemplateSet().Execute(f, "xo_package.go.tpl", args)
+		err = args.TemplateSet().Execute(f, "xo_package.go.tpl", imports)
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +379,7 @@ func writeTypes(args *internal.ArgType) error {
 		}
 
 		// get file and filename
-		f, err = getFile(args, &t)
+		f, err = getFile(args, &t, false)
 		if err != nil {
 			return err
 		}
@@ -376,12 +408,58 @@ func writeTypes(args *internal.ArgType) error {
 		if err != nil {
 			return err
 		}
+		delete(files, k)
 	}
 
 	// process written files with goimports
 	output, err := exec.Command("goimports", params...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s with error message: %s", output, err.Error())
+	}
+
+	return nil
+}
+
+func writeProto(args *internal.ArgType) error {
+	var err error
+
+	out := internal.TBufSlice(args.GeneratedProto)
+
+	// sort segments
+	sort.Sort(out)
+
+	// loop, writing in order
+	for _, t := range out {
+		var f *os.File
+
+		// check if generated template is only whitespace/empty
+		bufStr := strings.TrimSpace(t.Buf.String())
+		if len(bufStr) == 0 {
+			continue
+		}
+
+		// get file and filename
+		f, err = getFile(args, &t, true)
+		if err != nil {
+			return err
+		}
+
+		// write segment
+		_, err = t.Buf.WriteTo(f)
+		if err != nil {
+			return err
+		}
+	}
+
+	// build goimports parameters, closing files
+	for k, f := range files {
+
+		// close
+		err = f.Close()
+		if err != nil {
+			return err
+		}
+		delete(files, k)
 	}
 
 	return nil

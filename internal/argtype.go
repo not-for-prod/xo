@@ -144,6 +144,9 @@ type ArgType struct {
 	// Generated is the generated templates after a run.
 	Generated []TBuf `arg:"-"`
 
+	// Generated is the generated proto templates after a run.
+	GeneratedProto []TBuf `arg:"-"`
+
 	// KnownTypeMap is the collection of known Go types.
 	KnownTypeMap map[string]bool `arg:"-"`
 
@@ -157,8 +160,31 @@ type ArgType struct {
 	// Methods config file controls generation of specified methods for tables.
 	MethodsConfigFile string `arg:"--methods-config-file,help: specified methods config for tables"`
 
+	// OnlyConfigTable 只生成在 --methods-config-file 配置文件中的表
+	OnlyConfigTable bool `arg:"--only-config-table,help:only genereate tables in config file"`
+
 	// parsed from MethodsConfigFile
 	Methods *MethodsConfig `arg:"-"`
+
+	// eg. github.com/sundayfun/rpc/proto/backend/service
+	RpcProtoPathPrefix string `arg:"--rpc-proto-path-prefix"`
+
+	// eg. github.com/sundayfun/daycam-server/backend
+	ServerProtoPathPrefix string `arg:"--server-proto-path-prefix"`
+
+	Imports map[string][]string `arg:"-"`
+
+	ToPBTypeMap map[string]string `arg:"-"`
+
+	IncompatilbePBType map[string]bool `arg:"-"`
+
+	WrapperTypeMap map[string]string `arg:"-"`
+
+	ImportMap map[string]string `arg:"-"`
+
+	ConfigTables map[string]struct{} `arg:"-"`
+	// 加载成功后的 TableMap
+	TableMap map[string]*Type `arg:"-"`
 }
 
 // NewDefaultArgs returns the default arguments.
@@ -223,6 +249,47 @@ func NewDefaultArgs() *ArgType {
 			"Polygon":      true,
 			"MultiPolygon": true,
 		},
+
+		ServerProtoPathPrefix: "github.com/sundayfun/daycam-server/backend",
+
+		// TODO: @kippa 目前还没有处理 geo 相关类型
+		ToPBTypeMap: map[string]string{
+			"int8":    "int32",
+			"uint8":   "uint32",
+			"int16":   "int32",
+			"uint16":  "uint32",
+			"int":     "int32",
+			"uint":    "uint32",
+			"[]byte":  "bytes",
+			"float64": "double",
+			"float32": "float",
+		},
+
+		IncompatilbePBType: map[string]bool{
+			"bytes":  true,
+			"double": true,
+			"float":  true,
+		},
+
+		WrapperTypeMap: map[string]string{
+			"sql.NullString":  "StringValue",
+			"sql.NullInt64":   "Int64Value",
+			"sql.NullFloat64": "FloatValue",
+			"sql.NullBool":    "BoolValue",
+		},
+
+		ImportMap: map[string]string{
+			"sql.NullString":  "google/protobuf/wrappers.proto",
+			"sql.NullInt64":   "google/protobuf/wrappers.proto",
+			"sql.NullFloat64": "google/protobuf/wrappers.proto",
+			"sql.NullBool":    "google/protobuf/wrappers.proto",
+			"mysql.NullTime":  "google/protobuf/timestamp.proto",
+			"time.Time":       "google/protobuf/timestamp.proto",
+		},
+
+		Imports: make(map[string][]string),
+
+		ConfigTables: make(map[string]struct{}),
 	}
 }
 

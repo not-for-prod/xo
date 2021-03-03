@@ -1,6 +1,10 @@
 package internal
 
-import "github.com/xo/xo/models"
+import (
+	"strings"
+
+	"github.com/xo/xo/models"
+)
 
 // TemplateType represents a template type.
 type TemplateType uint
@@ -16,6 +20,7 @@ const (
 	QueryTypeTemplate
 	QueryTemplate
 	OptionalTemplate
+	TypeProtoTemplate
 
 	// always last
 	XOTemplate
@@ -45,6 +50,8 @@ func (tt TemplateType) String() string {
 		s = "query"
 	case OptionalTemplate:
 		s = "optional"
+	case TypeProtoTemplate:
+		s = "type"
 	default:
 		panic("unknown TemplateType")
 	}
@@ -93,7 +100,13 @@ func (rt RelType) String() string {
 }
 
 type MethodsConfig struct {
-	ListFields []string `yaml:"list_fields"`
+	ListFields []string                  `yaml:"list_fields"`
+	ModelToPB  map[string][]*TableConfig `yaml:"model_to_pb"`
+}
+
+type TableConfig struct {
+	Name  string   `yaml:"name"`
+	Skips []string `yaml:"skips"`
 }
 
 // EnumValue holds data for a single enum value.
@@ -142,6 +155,7 @@ type Type struct {
 	PrimaryKey       *Field
 	PrimaryKeyFields []*Field
 	Fields           []*Field
+	Indexes          map[string]*Index
 	Table            *models.Table
 	Comment          string
 	HasDeletedField  bool
@@ -172,9 +186,30 @@ type Index struct {
 }
 
 type MethodsOption struct {
-	Type       *Type
-	Sub        string
-	ListFields bool
+	Type            *Type
+	Sub             string
+	ListFields      bool
+	ModelToPB       bool
+	ModelToPBConfig *ModelToPBConfig
+}
+
+type ModelToPBConfig struct {
+	ImportService string
+	SkipFields    map[string]struct{}
+}
+
+type ProtoConfig []*MethodsOption
+
+func (t ProtoConfig) Len() int {
+	return len(t)
+}
+
+func (t ProtoConfig) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
+}
+
+func (t ProtoConfig) Less(i, j int) bool {
+	return strings.Compare(t[i].Sub, t[j].Sub) < 0
 }
 
 // QueryParam is a query parameter for a custom query.
@@ -195,4 +230,10 @@ type Query struct {
 	Interpolate   bool
 	Type          *Type
 	Comment       string
+}
+
+type Imports struct {
+	Package string
+	Imports []string
+	Schema  string
 }

@@ -1,4 +1,4 @@
-module github.com/KippaZou/xo
+module github.com/not-for-prod/xo
 
 require (
 	github.com/alexflint/go-arg v0.0.0-20181120184500-fb7d95b61ba8

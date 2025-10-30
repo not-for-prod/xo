@@ -7,7 +7,7 @@ import (
 
 	"github.com/kenshaw/snaker"
 
-	"github.com/KippaZou/xo/internal"
+	"github.com/not-for-prod/xo/internal"
 	"github.com/xo/xo/models"
 )
 
@@ -230,10 +230,12 @@ func MyEnumValues(db models.XODB, schema string, enum string) ([]*models.EnumVal
 	// process enum vals
 	enumVals := []*models.EnumValue{}
 	for i, ev := range strings.Split(res.EnumValues[1:len(res.EnumValues)-1], "','") {
-		enumVals = append(enumVals, &models.EnumValue{
-			EnumValue:  ev,
-			ConstValue: i + 1,
-		})
+		enumVals = append(
+			enumVals, &models.EnumValue{
+				EnumValue:  ev,
+				ConstValue: i + 1,
+			},
+		)
 	}
 
 	return enumVals, nil
@@ -267,11 +269,13 @@ func MyTables(db models.XODB, schema string, relkind string) ([]*models.Table, e
 				manualPk = false
 			}
 		}
-		tables = append(tables, &models.Table{
-			TableName: row.TableName,
-			Type:      row.Type,
-			ManualPk:  manualPk,
-		})
+		tables = append(
+			tables, &models.Table{
+				TableName: row.TableName,
+				Type:      row.Type,
+				ManualPk:  manualPk,
+			},
+		)
 	}
 
 	return tables, nil

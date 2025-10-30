@@ -1,3 +1,4 @@
+//go:build oracle
 // +build oracle
 
 package loaders
@@ -10,7 +11,7 @@ import (
 
 	_ "gopkg.in/rana/ora.v4"
 
-	"github.com/KippaZou/xo/internal"
+	"github.com/not-for-prod/xo/internal"
 	"github.com/xo/xo/models"
 )
 

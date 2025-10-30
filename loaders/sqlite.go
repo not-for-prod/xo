@@ -6,7 +6,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/KippaZou/xo/internal"
+	"github.com/not-for-prod/xo/internal"
 	"github.com/xo/xo/models"
 )
 
@@ -24,7 +24,12 @@ func init() {
 		IndexList: func(db models.XODB, schema string, table string) ([]*models.Index, error) {
 			return models.SqTableIndexes(db, table)
 		},
-		IndexColumnList: func(db models.XODB, schema string, table string, index string) ([]*models.IndexColumn, error) {
+		IndexColumnList: func(
+			db models.XODB,
+			schema string,
+			table string,
+			index string,
+		) ([]*models.IndexColumn, error) {
 			return models.SqIndexColumns(db, index)
 		},
 		QueryColumnList: SqQueryColumns,
@@ -159,11 +164,13 @@ func SqTables(db models.XODB, schema string, relkind string) ([]*models.Table, e
 				}
 			}
 		}
-		tables = append(tables, &models.Table{
-			TableName: row.TableName,
-			Type:      row.Type,
-			ManualPk:  manualPk,
-		})
+		tables = append(
+			tables, &models.Table{
+				TableName: row.TableName,
+				Type:      row.Type,
+				ManualPk:  manualPk,
+			},
+		)
 	}
 
 	return tables, nil
@@ -182,14 +189,16 @@ func SqTableColumns(db models.XODB, schema string, table string) ([]*models.Colu
 	// fix columns
 	var cols []*models.Column
 	for _, row := range rows {
-		cols = append(cols, &models.Column{
-			FieldOrdinal: row.FieldOrdinal,
-			ColumnName:   row.ColumnName,
-			DataType:     row.DataType,
-			NotNull:      row.NotNull,
-			DefaultValue: row.DefaultValue,
-			IsPrimaryKey: row.PkColIndex != 0,
-		})
+		cols = append(
+			cols, &models.Column{
+				FieldOrdinal: row.FieldOrdinal,
+				ColumnName:   row.ColumnName,
+				DataType:     row.DataType,
+				NotNull:      row.NotNull,
+				DefaultValue: row.DefaultValue,
+				IsPrimaryKey: row.PkColIndex != 0,
+			},
+		)
 	}
 
 	return cols, nil

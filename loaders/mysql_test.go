@@ -3,8 +3,8 @@ package loaders_test
 import (
 	"testing"
 
-	"github.com/KippaZou/xo/internal"
-	"github.com/KippaZou/xo/loaders"
+	"github.com/not-for-prod/xo/internal"
+	"github.com/not-for-prod/xo/loaders"
 )
 
 func Test_MyParseType(t *testing.T) {
@@ -124,7 +124,17 @@ func Test_MyParseType(t *testing.T) {
 	for i, tt := range tests {
 		precision, nilVal, typ := loaders.MyParseType(&internal.ArgType{}, tt.dt, tt.nullable)
 		if precision != tt.precision || nilVal != tt.nilVal || typ != tt.typ {
-			t.Fatalf("test #%d: %s\n\texp: %d, %s, %s\n\tgot: %d, %s, %s", i+1, tt.desc, tt.precision, tt.nilVal, tt.typ, precision, nilVal, typ)
+			t.Fatalf(
+				"test #%d: %s\n\texp: %d, %s, %s\n\tgot: %d, %s, %s",
+				i+1,
+				tt.desc,
+				tt.precision,
+				tt.nilVal,
+				tt.typ,
+				precision,
+				nilVal,
+				typ,
+			)
 		}
 	}
 }

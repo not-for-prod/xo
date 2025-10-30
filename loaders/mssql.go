@@ -7,7 +7,7 @@ import (
 
 	"github.com/kenshaw/snaker"
 
-	"github.com/KippaZou/xo/internal"
+	"github.com/not-for-prod/xo/internal"
 	"github.com/xo/xo/models"
 )
 
@@ -242,11 +242,13 @@ func MsTables(db models.XODB, schema string, relkind string) ([]*models.Table, e
 				manualPk = false
 			}
 		}
-		tables = append(tables, &models.Table{
-			TableName: row.TableName,
-			Type:      row.Type,
-			ManualPk:  manualPk,
-		})
+		tables = append(
+			tables, &models.Table{
+				TableName: row.TableName,
+				Type:      row.Type,
+				ManualPk:  manualPk,
+			},
+		)
 	}
 
 	return tables, nil

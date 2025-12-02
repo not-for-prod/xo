@@ -44,8 +44,11 @@ func (a *ArgType) NewTemplateFuncs() template.FuncMap {
 		"PBToModel":          a.PBToModel,
 		"proto":              a.proto,
 		"GoPackageName":      goPackageName,
+		"add":                add,
 	}
 }
+
+func add(a, b int) int { return a + b }
 
 // retype checks typ against known types, and prefixing
 // ArgType.CustomTypePackage (if applicable).
@@ -351,7 +354,13 @@ func (a *ArgType) colnamesquery(fields []*Field, hasDeletedField bool, sep strin
 // Used to create a list of column names in a WHERE clause (ie, "field_1 = $1
 // AND field_2 = $2 AND ...") or in an UPDATE clause (ie, "field = $1, field =
 // $2, ...").
-func (a *ArgType) colnamesquerymulti(fields []*Field, hasDeletedField bool, sep string, startCount int, ignoreNames []*Field) string {
+func (a *ArgType) colnamesquerymulti(
+	fields []*Field,
+	hasDeletedField bool,
+	sep string,
+	startCount int,
+	ignoreNames []*Field,
+) string {
 	ignore := map[string]bool{}
 	for _, f := range ignoreNames {
 		ignore[f.Name] = true
@@ -785,15 +794,20 @@ func (a *ArgType) modelToPB(option *MethodsOption) string {
 	if err != nil {
 		return nil, err
 	}
-`, f, shortName, field.Name)
+`, f, shortName, field.Name,
+			)
 			fa = fmt.Sprintf(`%s:%s,`, SnakeToCamelWithoutInitialisms(field.Col.ColumnName), f)
 		} else {
 			if t, ok := a.ToPBTypeMap[field.Type]; ok && !a.IncompatilbePBType[t] {
-				fa = fmt.Sprintf(`%s:%s(%s.%s),`, SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
-					t, shortName, field.Name)
+				fa = fmt.Sprintf(
+					`%s:%s(%s.%s),`, SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
+					t, shortName, field.Name,
+				)
 			} else {
-				fa = fmt.Sprintf(`%s:%s.%s,`, SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
-					shortName, field.Name)
+				fa = fmt.Sprintf(
+					`%s:%s.%s,`, SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
+					shortName, field.Name,
+				)
 			}
 		}
 		fieldsAssignment = append(fieldsAssignment, fa)
@@ -802,7 +816,12 @@ func (a *ArgType) modelToPB(option *MethodsOption) string {
 		`proto%s := &%s.%s{
 	%s
 }
-`, option.Type.Name, goPackageName(option.ModelToPBConfig.ImportService), option.Type.Name, strings.Join(fieldsAssignment, "\n"))
+`,
+		option.Type.Name,
+		goPackageName(option.ModelToPBConfig.ImportService),
+		option.Type.Name,
+		strings.Join(fieldsAssignment, "\n"),
+	)
 	for _, field := range option.Type.Fields {
 		if field.Col.NotNull || field.Type == "[]byte" {
 			continue
@@ -824,13 +843,15 @@ func (a *ArgType) modelToPB(option *MethodsOption) string {
 }
 `, shortName, field.Name,
 				f, shortName, field.Name,
-				option.Type.Name, s, f)
+				option.Type.Name, s, f,
+			)
 		} else if typ, ok := a.WrapperTypeMap[field.Type]; ok {
 			fa = fmt.Sprintf(
 				`if %s.%s.Valid {
 	proto%s.%s = &wrappers.%s{Value:%s.%s.%s}
 }
-`, shortName, field.Name, option.Type.Name, s, typ, shortName, field.Name, strings.Trim(typ, "Value"))
+`, shortName, field.Name, option.Type.Name, s, typ, shortName, field.Name, strings.Trim(typ, "Value"),
+			)
 		} else {
 			log.Printf("WARN: %s.%s could be null, skipping!", option.Type.Name, field.Name)
 		}
@@ -866,15 +887,20 @@ func (a *ArgType) PBToModel(option *MethodsOption) string {
 	if err != nil {
 		return nil, err
 	}
-`, f, option.Type.Name, field.Name)
+`, f, option.Type.Name, field.Name,
+			)
 			fa = fmt.Sprintf(`%s:%s,`, field.Name, f)
 
 		} else if t, ok := a.ToPBTypeMap[field.Type]; ok && !a.IncompatilbePBType[t] {
-			fa = fmt.Sprintf(`%s:%s(proto%s.%s),`, field.Name, field.Type, option.Type.Name,
-				SnakeToCamelWithoutInitialisms(field.Col.ColumnName))
+			fa = fmt.Sprintf(
+				`%s:%s(proto%s.%s),`, field.Name, field.Type, option.Type.Name,
+				SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
+			)
 		} else {
-			fa = fmt.Sprintf(`%s:proto%s.%s,`, field.Name, option.Type.Name,
-				SnakeToCamelWithoutInitialisms(field.Col.ColumnName))
+			fa = fmt.Sprintf(
+				`%s:proto%s.%s,`, field.Name, option.Type.Name,
+				SnakeToCamelWithoutInitialisms(field.Col.ColumnName),
+			)
 		}
 		fieldsAssignment = append(fieldsAssignment, fa)
 	}
@@ -883,7 +909,8 @@ func (a *ArgType) PBToModel(option *MethodsOption) string {
 		`%s := &%s{
 	%s
 }
-`, shortName, option.Type.Name, strings.Join(fieldsAssignment, "\n"))
+`, shortName, option.Type.Name, strings.Join(fieldsAssignment, "\n"),
+	)
 
 	for _, field := range option.Type.Fields {
 		if _, ok := option.ModelToPBConfig.SkipFields[field.Col.ColumnName]; ok {
@@ -906,14 +933,16 @@ func (a *ArgType) PBToModel(option *MethodsOption) string {
 }
 `, option.Type.Name, s,
 				f, option.Type.Name, s,
-				shortName, field.Name, f)
+				shortName, field.Name, f,
+			)
 
 		} else if typ, ok := a.WrapperTypeMap[field.Type]; ok {
 			fa = fmt.Sprintf(
 				`if proto%s.%s != nil {
 	%s.%s = %s{%s:proto%s.%s.Value, Valid:true}
 }
-`, option.Type.Name, s, shortName, field.Name, field.Type, strings.TrimSuffix(typ, "Value"), option.Type.Name, s)
+`, option.Type.Name, s, shortName, field.Name, field.Type, strings.TrimSuffix(typ, "Value"), option.Type.Name, s,
+			)
 		} else {
 			log.Printf("WARN: %s.%s could be null, skipping!", option.Type.Name, field.Name)
 		}
@@ -959,7 +988,8 @@ option go_package = "%s/service/%s";
 option java_multiple_files = true;
 option objc_class_prefix = "RPC";
 
-`, ProtoName(svc), strings.Join(imports, "\n"), a.ServerProtoPathPrefix, goPackageName(svc))
+`, ProtoName(svc), strings.Join(imports, "\n"), a.ServerProtoPathPrefix, goPackageName(svc),
+	)
 
 	for _, p := range pc {
 		fieldsDef := make([]string, 0, len(p.Type.Fields))
@@ -988,7 +1018,8 @@ option objc_class_prefix = "RPC";
 			`message %s {
 %s
 }
-`, p.Type.Name, strings.Join(fieldsDef, "\n"))
+`, p.Type.Name, strings.Join(fieldsDef, "\n"),
+		)
 	}
 	return body
 }

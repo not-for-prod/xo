@@ -723,6 +723,14 @@ func (a *ArgType) convext(prefix string, f *Field, t *Field) string {
 		ft = info.ValueType
 	}
 
+	if info, ok := nullableWrapperInfo(t.Type); ok {
+		if info.ValueType != ft {
+			expr = info.ValueType + "(" + expr + ")"
+		}
+
+		return fmt.Sprintf("%s{%s: %s, Valid: true}", t.Type, info.ValueField, expr)
+	}
+
 	if t.Type != ft {
 		expr = t.Type + "(" + expr + ")"
 	}

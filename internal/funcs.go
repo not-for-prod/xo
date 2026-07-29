@@ -45,10 +45,43 @@ func (a *ArgType) NewTemplateFuncs() template.FuncMap {
 		"proto":              a.proto,
 		"GoPackageName":      goPackageName,
 		"add":                add,
+		"nullablefield":      a.nullablefield,
 	}
 }
 
 func add(a, b int) int { return a + b }
+
+type nullableFieldInfo struct {
+	ValueField string
+	ValueType  string
+}
+
+// nullableWrapperInfo is the single unwrap table for nullable wrapper types
+// used by template helpers when they need the underlying Go value.
+func nullableWrapperInfo(typ string) (nullableFieldInfo, bool) {
+	if strings.HasPrefix(typ, "sql.Null") {
+		suffix := typ[len("sql.Null"):]
+		return nullableFieldInfo{
+			ValueField: suffix,
+			ValueType:  strings.ToLower(suffix),
+		}, true
+	}
+
+	switch typ {
+	case "mysql.NullTime", "pq.NullTime":
+		return nullableFieldInfo{
+			ValueField: "Time",
+			ValueType:  "time.Time",
+		}, true
+	case "uuid.NullUUID":
+		return nullableFieldInfo{
+			ValueField: "UUID",
+			ValueType:  "uuid.UUID",
+		}, true
+	default:
+		return nullableFieldInfo{}, false
+	}
+}
 
 // retype checks typ against known types, and prefixing
 // ArgType.CustomTypePackage (if applicable).
@@ -685,9 +718,17 @@ func (a *ArgType) convext(prefix string, f *Field, t *Field) string {
 	}
 
 	ft := f.Type
-	if strings.HasPrefix(ft, "sql.Null") {
-		expr = expr + "." + f.Type[8:]
-		ft = strings.ToLower(f.Type[8:])
+	if info, ok := nullableWrapperInfo(ft); ok {
+		expr = expr + "." + info.ValueField
+		ft = info.ValueType
+	}
+
+	if info, ok := nullableWrapperInfo(t.Type); ok {
+		if info.ValueType != ft {
+			expr = info.ValueType + "(" + expr + ")"
+		}
+
+		return fmt.Sprintf("%s{%s: %s, Valid: true}", t.Type, info.ValueField, expr)
 	}
 
 	if t.Type != ft {
@@ -695,6 +736,11 @@ func (a *ArgType) convext(prefix string, f *Field, t *Field) string {
 	}
 
 	return expr
+}
+
+func (a *ArgType) nullablefield(f *Field) bool {
+	_, ok := nullableWrapperInfo(f.Type)
+	return ok
 }
 
 // schemafn takes a series of names and joins them with the schema name.
